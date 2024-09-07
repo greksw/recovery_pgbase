@@ -32,15 +32,23 @@ create_db() {
     fi
 }
 
-# Функция для восстановления базы данных
-restore_and_notify() {
+# Функция для поиска самого свежего дампа и его восстановления
+restore_latest_dump() {
     local dbname="$1"
-    local dump_file="$2"
-    gunzip -c $dump_file | psql -U postgres -d $dbname
-    if [ $? -eq 0 ]; then
-        log_and_notify "✅ База данных $dbname успешно восстановлена из дампа."
+    local backup_dir="$2"
+    
+    # Поиск самого свежего файла дампа
+    local latest_dump=$(ls -t "$backup_dir"/*.sql.gz 2>/dev/null | head -n 1)
+    
+    if [ -z "$latest_dump" ]; then
+        log_and_notify "❌ Для базы данных $dbname не найдено дампов в директории $backup_dir."
     else
-        log_and_notify "❌ Ошибка при восстановлении базы данных $dbname из дампа."
+        gunzip -c "$latest_dump" | psql -U postgres -d $dbname
+        if [ $? -eq 0 ]; then
+            log_and_notify "✅ База данных $dbname успешно восстановлена из дампа $latest_dump."
+        else
+            log_and_notify "❌ Ошибка при восстановлении базы данных $dbname из дампа $latest_dump."
+        fi
     fi
 }
 
@@ -63,19 +71,19 @@ if [ $HOST1_STATUS -eq 0 ]; then
     if [ $MOUNT1_STATUS -eq 0 ]; then
         log_and_notify "✅ Шара успешно примонтирована, начинаем процесс восстановления баз данных..."
 
-        # Список баз данных
+        # Список баз данных и соответствующих директорий с дампами
         declare -A databases
         databases=(
-            ["bueks"]="$MOUNT_POINT1/everyday/bueks/$TIME-bueks.sql.gz"
-            ["butmt"]="$MOUNT_POINT1/everyday/butmt/$TIME-butmt.sql.gz"
-            ["buvfn"]="$MOUNT_POINT1/everyday/buvfn/$TIME-buvfn.sql.gz"
-            # Добавьте сюда остальные базы данных, если необходимо
+            ["bueks"]="$MOUNT_POINT1/everyday/bueks"
+            ["butmt"]="$MOUNT_POINT1/everyday/butmt"
+            ["buvfn"]="$MOUNT_POINT1/everyday/buvfn"
+            # Добавьте сюда остальные базы данных
         )
 
-        # Создаем базы данных и восстанавливаем из дампов
+        # Создаем базы данных и восстанавливаем из последнего дампа
         for dbname in "${!databases[@]}"; do
             create_db "$dbname"
-            restore_and_notify "$dbname" "${databases[$dbname]}"
+            restore_latest_dump "$dbname" "${databases[$dbname]}"
         done
 
         log_and_notify "✅ Все базы данных успешно восстановлены."
