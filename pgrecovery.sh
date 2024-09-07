@@ -3,8 +3,9 @@
 # Задаем переменные:
 TIME=`date +"%Y-%m-%d_%H-%M"`
 
-# Пути к лог-файлу и точкам монтирования
-LOG_FILE="/mnt/pgsql_restore.log"
+# Пути к временным и основным лог-файлам
+TEMP_LOG_FILE="/tmp/pgsql_restore_temp.log"
+LOG_FILE="/mnt/backup/PgSql/pgsql_restore.log"
 MOUNT_POINT1="/mnt/backup/PgSql"
 
 # Telegram Bot API параметры
@@ -17,13 +18,14 @@ SCRIPT_NAME="Восстановление баз данных 1C8_PG_restore:"
 # Функция для записи логов и отправки уведомлений
 log_and_notify() {
     local message="$1"
-    echo "$(date '+%Y-%m-%d %H:%M:%S') $message" >> $LOG_FILE
+    echo "$(date '+%Y-%m-%d %H:%M:%S') $message" >> $TEMP_LOG_FILE
     curl -s -X POST "https://api.telegram.org/bot$TOKEN/sendMessage" -d chat_id=$CHAT_ID -d text="$SCRIPT_NAME: $message" > /dev/null
 }
 
 # Функция для создания базы данных
 create_db() {
     local dbname="$1"
+    dropdb -U postgres --if-exists $dbname
     createdb -U postgres $dbname
     if [ $? -eq 0 ]; then
         log_and_notify "✅ База данных $dbname успешно создана."
@@ -37,7 +39,6 @@ restore_latest_dump() {
     local dbname="$1"
     local backup_dir="$2"
     
-    # Поиск самого свежего файла дампа
     local latest_dump=$(ls -t "$backup_dir"/*.sql.gz 2>/dev/null | head -n 1)
     
     if [ -z "$latest_dump" ]; then
@@ -67,8 +68,13 @@ if [ $HOST1_STATUS -eq 0 ]; then
     sudo mount -t cifs //192.168.1.2/Backup_data/PgSql $MOUNT_POINT1 -o username=user1,password=123,domain=workgroup,iocharset=utf8,file_mode=0777,dir_mode=0777
     MOUNT1_STATUS=$?
 
-    # Если монтирование прошло успешно
     if [ $MOUNT1_STATUS -eq 0 ]; then
+        # После успешного монтирования копируем временные логи в основной файл
+        if [ ! -f "$LOG_FILE" ]; then
+            sudo touch "$LOG_FILE"
+        fi
+        cat $TEMP_LOG_FILE >> $LOG_FILE
+
         log_and_notify "✅ Шара успешно примонтирована, начинаем процесс восстановления баз данных..."
 
         # Список баз данных и соответствующих директорий с дампами
